@@ -21,6 +21,124 @@ vez de so uma decisao crisp.
 Nada da BC ou do motor de v1 foi reescrito; a fuzzy e uma leitura adicional
 sobre a mesma evidencia, nao uma substituicao.
 
+## As dez regras herdadas de v1, em linguagem natural
+
+Sem alteracao nenhuma em relacao a v1 — reproduzidas aqui para que este
+documento seja autossuficiente.
+
+### Nivel 1: da evidencia ao indicador
+
+**1. `indicador_forca_bruta`**
+SE uma conexao acumulou 10 ou mais falhas de login na janela observada,
+ENTAO registre o indicador `forca_bruta` para o host de origem.
+
+**2. `indicador_varredura`**
+SE uma conexao tocou 100 ou mais portas distintas,
+ENTAO registre o indicador `varredura` para o host de origem.
+
+**3. `indicador_exfiltracao`**
+SE uma conexao enviou mais de 500 MB para fora E isso aconteceu fora do
+expediente (antes das 8h ou a partir das 19h),
+ENTAO registre o indicador `exfiltracao` para o host de origem.
+
+As duas condicoes precisam valer juntas. Volume alto sozinho e backup.
+
+**4. `indicador_integridade`**
+SE um arquivo critico do sistema teve o checksum divergindo do baseline,
+ENTAO registre o indicador `integridade_violada` para o host ligado a alteracao.
+
+Unica regra de nivel 1 que nao olha para a rede.
+
+### Nivel 2: do indicador a ameaca
+
+**5. `ameaca_intrusao`**
+SE o mesmo host produziu os indicadores `varredura` E `forca_bruta`,
+ENTAO levante a ameaca `intrusao_ativa` de nivel alto.
+
+O "mesmo host" e o coracao da regra. Os dois indicadores em hosts diferentes nao
+significam nada.
+
+**6. `ameaca_vazamento`**
+SE um host produziu o indicador `exfiltracao`,
+ENTAO levante a ameaca `vazamento_dados` de nivel alto.
+
+Um unico indicador ja sustenta a hipotese, porque exfiltracao fora de hora nao
+tem leitura inocente.
+
+**7. `ameaca_critica`** (salience 80)
+SE um host tem o indicador `integridade_violada` E ja tem alguma ameaca de nivel
+alto,
+ENTAO escale para a ameaca `comprometimento_raiz` de nivel critico.
+
+A salience 80 garante que a escalada aconteca antes de qualquer decisao ser
+tomada sobre aquele host.
+
+### Nivel 3: da ameaca a decisao
+
+**8. `revogar_monitoramento`** (salience 110)
+SE um host tem ameaca critica E ja existe uma decisao de `MONITORAR` para ele,
+ENTAO remova essa decisao da memoria de trabalho.
+
+Unica regra que retira um fato da MT em vez de acrescentar.
+
+**9. `decisao_isolar`** (salience 100)
+SE um host tem uma ameaca de nivel critico,
+ENTAO recomende `ISOLAR` aquele host.
+
+**10. `decisao_monitorar`** (salience 50)
+SE um host tem uma ameaca de nivel alto E nao tem nenhuma ameaca critica,
+ENTAO recomende `MONITORAR` aquele host.
+
+`ISOLAR` e `MONITORAR` sao mutuamente exclusivas para o mesmo host atraves de
+tres mecanismos: **salience** ordena o conjunto-conflito (`ameaca_critica` 80
+vence `decisao_monitorar` 50), **`NOT(...)`** tira `decisao_monitorar` da
+agenda assim que a ameaca critica entra na MT, e **`retract`** revoga um
+`MONITORAR` ja declarado numa rodada anterior (`revogar_monitoramento`,
+salience 110, antes de `decisao_isolar`). Detalhe completo em
+[README.md](README.md#resolucao-de-conflito).
+
+## Os 3 casos de teste do motor crisp
+
+Tambem herdados de v1 sem alteracao, rodados por `_autoverificar()` no inicio
+do notebook, antes da camada fuzzy:
+
+### Caso 1: a cadeia de ponta a ponta (`_verificar_cadeia`)
+
+Tres hosts entram na MT ao mesmo tempo e o motor roda uma vez.
+
+| Host | Evidencia | Esperado |
+| --- | --- | --- |
+| `10.0.0.66` | 512 portas, 47 falhas de login, `/etc/shadow` alterado | `ISOLAR` |
+| `10.0.0.20` | 900 MB de saida as 2h | `MONITORAR` |
+| `10.0.0.5` | 2 portas, 1 falha, trafego normal as 14h | nenhuma decisao |
+
+Verifica tambem que o host critico nunca aparece na trilha de explicacao com
+uma decisao de `MONITORAR`, nem provisoria.
+
+### Caso 2: os limiares, dos dois lados (`_verificar_limiares`)
+
+Cada limiar e testado logo abaixo e logo acima do corte:
+
+| Condicao | Nao dispara | Dispara |
+| --- | --- | --- |
+| falhas de login | 9 | 10 |
+| portas distintas | 99 | 100 |
+| bytes de saida | exatamente 500 MB | 500 MB + 1 byte |
+
+Verifica ainda que o mesmo volume enviado dentro do expediente (14h) nao gera
+`exfiltracao`.
+
+### Caso 3: exclusao mutua entre rodadas (`_verificar_exclusao_mutua`)
+
+A escalada chega numa segunda janela de coleta, com a decisao antiga ja na
+memoria: declara varredura + forca bruta e roda (`MONITORAR`), depois declara
+o arquivo critico alterado e roda de novo (`ISOLAR`, exatamente uma decisao
+na MT, com `revogar_monitoramento` disparando antes de `decisao_isolar`).
+
+Esses tres casos sao os que garantem que a evidencia usada pela tabela crisp
+x fuzzy abaixo (`_evidencia`, os mesmos 3 hosts) produz as decisoes crisp
+corretas antes de virar entrada do controlador fuzzy.
+
 ## O dominio
 
 Um analista de SOC recebe alertas continuamente e precisa decidir, na hora,
