@@ -1,51 +1,58 @@
 # cyber-warden v2
 
-Controlador fuzzy Mamdani, em [scikit-fuzzy](https://pythonhosted.org/scikit-fuzzy/),
-que prioriza alertas de seguranca a partir de duas leituras que um SOC ja
-coleta: a gravidade tecnica do indicador e a confianca de que ele e um
-verdadeiro positivo.
+Versao 2 do [Warden](README.md): tudo do motor de regras original —
+`Fact`s, as 10 regras `@Rule`, o motor de encadeamento progressivo, o
+subsistema de explicacao, o cenario de demonstracao — foi mantido sem
+reescrever. `cyber_warden_v2.ipynb` acrescenta uma camada nova por cima: um
+controlador fuzzy Mamdani, em [scikit-fuzzy](https://pythonhosted.org/scikit-fuzzy/),
+que le a mesma evidencia bruta e produz uma prioridade continua de 0 a 10, em
+vez de so uma decisao crisp.
 
-E um trabalho a parte do sistema especialista em [README.md](README.md) —
-mesmo dominio (triagem de alertas), tecnica diferente (logica fuzzy em vez de
-regras booleanas encadeadas em `experta`).
+## O que foi reaproveitado de v1
+
+| De v1 | Como e usado em v2 |
+| --- | --- |
+| `Conexao`, `Arquivo` (Facts de nivel 0) | viram as entradas do controlador fuzzy, via `severidade_de(...)` e `confianca_de(...)` |
+| `EXPEDIENTE`, `LIMITE_EXFILTRACAO` | os mesmos dois limiares, reusados nas mesmas contas |
+| Limiares das regras `indicador_forca_bruta` (10) e `indicador_varredura` (100) | normalizam `severidade` e disparam os pesos de `confianca` |
+| O cenario de `demo()` (hosts `10.0.0.66`, `10.0.0.20`, `10.0.0.5`) | roda pelas duas leituras, crisp e fuzzy, no mesmo notebook |
+| `motor.decisoes()` | comparado lado a lado com a prioridade fuzzy na tabela final |
+
+Nada da BC ou do motor de v1 foi reescrito; a fuzzy e uma leitura adicional
+sobre a mesma evidencia, nao uma substituicao.
 
 ## O dominio
 
 Um analista de SOC recebe alertas continuamente e precisa decidir, na hora,
-quais tratar primeiro. Duas leituras isoladas raramente bastam: um indicador
-de severidade alta mas com baixa confianca (pode ser falso positivo de uma
-regra ruidosa) nao deveria furar a fila na frente de um indicador de
-severidade media com confianca alta (uma assinatura confirmada). O
-controlador combina as duas em um unico score de prioridade continuo, em vez
-de dois limiares independentes que ignoram essa interacao.
-
-## Arquitetura
-
-| Componente | Onde fica |
-| --- | --- |
-| Antecedentes (entradas) | `severidade`, `confianca` — `ctrl.Antecedent` |
-| Consequente (saida) | `prioridade` — `ctrl.Consequent` |
-| Base de regras | lista de `ctrl.Rule`, uma por combinacao de termos |
-| Motor de inferencia | `ctrl.ControlSystem` + `ctrl.ControlSystemSimulation` |
+quais tratar primeiro. A decisao crisp de v1 (`ISOLAR`/`MONITORAR`/nenhuma) ja
+resolve isso, mas colapsa tudo em tres categorias. Dentro da fila de
+`MONITORAR`, por exemplo, hosts com evidencia bem diferente ficam
+indistinguiveis. A camada fuzzy de v2 preserva essa granularidade: dois hosts
+`MONITORAR` podem ter prioridades fuzzy 4.1 e 6.8, e a fila de triagem usa
+esse numero para ordenar, em vez de tratar os dois como equivalentes.
 
 ## Entradas e saida
 
-| Variavel | Faixa | O que mede |
+| Variavel | Faixa | De onde vem |
 | --- | --- | --- |
-| `severidade` (entrada) | 0 a 10 | gravidade tecnica do indicador, estilo CVSS |
-| `confianca` (entrada) | 0 a 100 | confianca de que o alerta e verdadeiro positivo, nao ruido |
-| `prioridade` (saida) | 0 a 10 | urgencia recomendada de tratamento |
+| `severidade` (entrada) | 0 a 10 | calculada em `severidade_de(...)` a partir de `portas`, `tentativas_login`, `bytes_saida`, `hora`, `hash_mudou` |
+| `confianca` (entrada) | 0 a 100 | calculada em `confianca_de(...)`, um peso fixo por indicador de v1 disparado |
+| `prioridade` (saida) | 0 a 10 | urgencia recomendada, continua |
+
+`severidade` pesa o quanto cada sinal se aproxima do seu proprio limiar de
+v1, com peso maior para `exfiltracao` e `integridade_violada` — os dois
+indicadores que em v1 ja bastam sozinhos para levantar uma ameaca de nivel
+alto. `confianca` soma um peso fixo por indicador de v1 que a evidencia
+dispara, tambem maior para esses dois, porque `varredura` e `forca_bruta`
+sozinhos so viram ameaca quando combinados (`ameaca_intrusao`), e os outros
+dois nao precisam de par.
 
 ## Os termos linguisticos
 
 Tres termos por variavel (`baixa`, `media`, `alta`), o minimo que ainda
 distingue as tres decisoes reais de uma fila de triagem: descartar ou revisar
-depois, colocar na fila normal, ou acionar resposta imediata. Um quarto termo
-adicionaria granularidade sem mudar nenhuma dessas tres decisoes.
-
-Funcoes de pertinencia triangulares (`trimf`), cobrindo o dominio inteiro sem
-lacunas: em qualquer ponto do eixo, pelo menos um termo tem pertinencia
-maior que zero.
+depois, colocar na fila normal, ou acionar resposta imediata. Funcoes de
+pertinencia triangulares (`trimf`), cobrindo o dominio inteiro sem lacunas.
 
 ## Base de regras
 
@@ -59,39 +66,36 @@ cubra:
 | **media** | baixa | media | alta |
 | **alta** | media | alta | alta |
 
-A leitura e: severidade alta sozinha nao basta (confianca baixa segura a
-prioridade em media), e confianca alta sozinha tambem nao (severidade baixa
-segura a prioridade em media). So a combinacao dos dois extremos altos leva a
-prioridade alta.
+## Crisp x fuzzy, lado a lado
 
-## Casos de teste
+Rodando o cenario de `demo()` de v1 pelas duas leituras:
 
-O notebook roda tres casos de exemplo e uma autoverificacao (`assert`):
+| Host | Decisao crisp (v1) | severidade | confianca | Prioridade fuzzy (v2) |
+| --- | --- | --- | --- | --- |
+| `10.0.0.66` | ISOLAR | 7.00 | 70.0 | 5.38 |
+| `10.0.0.20` | MONITORAR | 3.06 | 40.0 | 4.65 |
+| `10.0.0.5` | sem decisao | 0.24 | 0.0 | 1.67 |
 
-| Caso | severidade | confianca | Esperado |
-| --- | --- | --- | --- |
-| scan de porta isolado, sem correlacao | 1 | 10% | prioridade baixa |
-| assinatura de exploit conhecido confirmada | 9 | 95% | prioridade alta |
-| indicador ambiguo de severidade media | 5 | 50% | prioridade proxima do meio da escala |
-
-A autoverificacao confere que os extremos opostos do dominio (`0,0` e
-`10,100`) produzem prioridades nos extremos opostos da escala, e que o ponto
-central (`5,50`) cai perto do meio.
+A ordem das prioridades fuzzy concorda com a gravidade das decisoes crisp
+(`ISOLAR` > `MONITORAR` > sem decisao), que e exatamente o que a
+autoverificacao (`_autoverificar_fuzzy`) confere.
 
 ## Build e execucao
 
-Sem build. No Colab, a primeira celula instala o `scikit-fuzzy`; rode as
-celulas em ordem. Localmente:
+Sem build. No Colab, a primeira celula nova instala o `scikit-fuzzy`; rode as
+celulas em ordem — as primeiras 20 sao identicas a `cyber_warden.ipynb`.
+Localmente:
 
 ```bash
-pip install scikit-fuzzy numpy
+pip install experta scikit-fuzzy numpy
 jupyter nbconvert --to notebook --execute --inplace cyber_warden_v2.ipynb
 ```
 
-A ultima celula roda a autoverificacao acima.
+A ultima celula roda a autoverificacao fuzzy; a autoverificacao crisp de v1
+(`_autoverificar()`) roda antes dela, sem alteracao.
 
 ## Apresentacao
 
-Discussao em sala de aula: a tabela de regras acima e os graficos de
+Discussao em sala de aula: a tabela crisp x fuzzy acima e os graficos de
 pertinencia das tres variaveis (`severidade.view()`, `confianca.view()`,
 `prioridade.view()`, ja no notebook) sao o material de apoio.

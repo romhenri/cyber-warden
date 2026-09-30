@@ -4,10 +4,11 @@ Sistema especialista de seguranca cibernetica escrito em
 [experta](https://github.com/nilp0inter/experta), com encadeamento progressivo
 em cadeia.
 
-Este README cobre o sistema baseado em regras (`cyber_warden.ipynb`). Um
-segundo notebook, `cyber_warden_v2.ipynb`, implementa um controlador fuzzy
-Mamdani separado para priorizacao de alertas — ver
-[cyber_warden_v2.md](cyber_warden_v2.md).
+Este README cobre o sistema baseado em regras (`cyber_warden.ipynb`).
+`cyber_warden_v2.ipynb` e a evolucao dele: mantem todo esse motor sem
+reescrever e acrescenta por cima um controlador fuzzy Mamdani, que le a mesma
+evidencia e produz uma prioridade continua em vez de so uma decisao crisp —
+ver [cyber_warden_v2.md](cyber_warden_v2.md).
 
 O sistema recebe evidencia bruta de rede (conexoes observadas e alteracoes em
 arquivos) e caminha sozinho, regra a regra, ate recomendar uma acao: isolar o
