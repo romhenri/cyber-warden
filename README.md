@@ -5,8 +5,9 @@ Sistema especialista de seguranca cibernetica escrito em
 em cadeia.
 
 Este README cobre o sistema baseado em regras (`cyber_warden.ipynb`).
-`cyber_warden_v2.ipynb` e a evolucao dele: mantem todo esse motor sem
-reescrever e acrescenta por cima um controlador fuzzy Mamdani, que le a mesma
+`cyber_warden_v2.ipynb` e a evolucao dele: mantem esse motor (com uma regra a mais,
+`ameaca_integridade`, que fecha o caso de arquivo critico alterado sem outro
+sinal) e acrescenta por cima um controlador fuzzy Mamdani, que le a mesma
 evidencia e produz uma prioridade continua em vez de so uma decisao crisp —
 ver [cyber_warden_v2.md](cyber_warden_v2.md).
 

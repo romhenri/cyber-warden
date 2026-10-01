@@ -1,9 +1,10 @@
 # cyber-warden v2
 
 Versao 2 do [Warden](README.md): tudo do motor de regras original —
-`Fact`s, as 10 regras `@Rule`, o motor de encadeamento progressivo, o
-subsistema de explicacao, o cenario de demonstracao — foi mantido sem
-reescrever. `cyber_warden_v2.ipynb` acrescenta uma camada nova por cima: um
+`Fact`s, as regras `@Rule`, o motor de encadeamento progressivo, o
+subsistema de explicacao, o cenario de demonstracao, foi mantido, com dois
+ajustes (a regra nova `ameaca_integridade` e saliences em camadas, descritos
+abaixo). `cyber_warden_v2.ipynb` acrescenta uma camada nova por cima: um
 controlador fuzzy Mamdani, em [scikit-fuzzy](https://pythonhosted.org/scikit-fuzzy/),
 que le a mesma evidencia bruta e produz uma prioridade continua de 0 a 10, em
 vez de so uma decisao crisp.
@@ -18,13 +19,20 @@ vez de so uma decisao crisp.
 | O cenario de `demo()` (hosts `10.0.0.66`, `10.0.0.20`, `10.0.0.5`) | roda pelas duas leituras, crisp e fuzzy, no mesmo notebook |
 | `motor.decisoes()` | comparado lado a lado com a prioridade fuzzy na tabela final |
 
-Nada da BC ou do motor de v1 foi reescrito; a fuzzy e uma leitura adicional
-sobre a mesma evidencia, nao uma substituicao.
+O motor de v1 nao foi reescrito; a fuzzy e uma leitura adicional sobre a mesma
+evidencia, nao uma substituicao. O unico acrescimo ao motor e a regra
+`ameaca_integridade`, que fecha um buraco de v1: um arquivo critico alterado
+sem nenhum outro sinal gerava so um `Rastro` e nenhuma decisao.
 
-## As dez regras herdadas de v1, em linguagem natural
+## As onze regras, em linguagem natural
 
-Sem alteracao nenhuma em relacao a v1 — reproduzidas aqui para que este
-documento seja autossuficiente.
+Dez herdadas de v1 e uma nova (`ameaca_integridade`, marcada abaixo),
+reproduzidas aqui para que este documento seja autossuficiente.
+
+Para a nova regra nao deixar `decisao_monitorar` disparar cedo demais, as
+saliences formam camadas: indicadores **120** > `revogar_monitoramento` 110 >
+`decisao_isolar` 100 > ameacas **90** > `ameaca_critica` 80 > `decisao_monitorar`
+50. Assim todos os indicadores e ameacas existem antes de qualquer decisao.
 
 ### Nivel 1: da evidencia ao indicador
 
@@ -65,9 +73,17 @@ ENTAO levante a ameaca `vazamento_dados` de nivel alto.
 Um unico indicador ja sustenta a hipotese, porque exfiltracao fora de hora nao
 tem leitura inocente.
 
-**7. `ameaca_critica`** (salience 80)
-SE um host tem o indicador `integridade_violada` E ja tem alguma ameaca de nivel
-alto,
+**7. `ameaca_integridade`** (nova em v2, salience 90)
+SE um host produziu o indicador `integridade_violada`,
+ENTAO levante a ameaca `integridade_comprometida` de nivel alto.
+
+Um arquivo critico alterado ja sustenta a hipotese sozinho. Sem esta regra,
+v1 nao decidia nada nesse caso.
+
+**8. `ameaca_critica`** (salience 80)
+SE um host tem o indicador `integridade_violada` E ja tem alguma *outra*
+ameaca de nivel alto (qualquer uma exceto `integridade_comprometida`, que e a
+propria integridade violada),
 ENTAO escale para a ameaca `comprometimento_raiz` de nivel critico.
 
 A salience 80 garante que a escalada aconteca antes de qualquer decisao ser
@@ -75,32 +91,32 @@ tomada sobre aquele host.
 
 ### Nivel 3: da ameaca a decisao
 
-**8. `revogar_monitoramento`** (salience 110)
+**9. `revogar_monitoramento`** (salience 110)
 SE um host tem ameaca critica E ja existe uma decisao de `MONITORAR` para ele,
 ENTAO remova essa decisao da memoria de trabalho.
 
 Unica regra que retira um fato da MT em vez de acrescentar.
 
-**9. `decisao_isolar`** (salience 100)
+**10. `decisao_isolar`** (salience 100)
 SE um host tem uma ameaca de nivel critico,
 ENTAO recomende `ISOLAR` aquele host.
 
-**10. `decisao_monitorar`** (salience 50)
+**11. `decisao_monitorar`** (salience 50)
 SE um host tem uma ameaca de nivel alto E nao tem nenhuma ameaca critica,
 ENTAO recomende `MONITORAR` aquele host.
 
 `ISOLAR` e `MONITORAR` sao mutuamente exclusivas para o mesmo host atraves de
 tres mecanismos: **salience** ordena o conjunto-conflito (`ameaca_critica` 80
-vence `decisao_monitorar` 50), **`NOT(...)`** tira `decisao_monitorar` da
+vence `decisao_monitorar` 50, e as ameacas a 90 vencem as duas), **`NOT(...)`** tira `decisao_monitorar` da
 agenda assim que a ameaca critica entra na MT, e **`retract`** revoga um
 `MONITORAR` ja declarado numa rodada anterior (`revogar_monitoramento`,
 salience 110, antes de `decisao_isolar`). Detalhe completo em
 [README.md](README.md#resolucao-de-conflito).
 
-## Os 3 casos de teste do motor crisp
+## Os 4 casos de teste do motor crisp
 
-Tambem herdados de v1 sem alteracao, rodados por `_autoverificar()` no inicio
-do notebook, antes da camada fuzzy:
+Tres herdados de v1 e um novo (Caso 3), rodados por `_autoverificar()` no
+inicio do notebook, antes da camada fuzzy:
 
 ### Caso 1: a cadeia de ponta a ponta (`_verificar_cadeia`)
 
@@ -128,14 +144,20 @@ Cada limiar e testado logo abaixo e logo acima do corte:
 Verifica ainda que o mesmo volume enviado dentro do expediente (14h) nao gera
 `exfiltracao`.
 
-### Caso 3: exclusao mutua entre rodadas (`_verificar_exclusao_mutua`)
+### Caso 3: integridade isolada (`_verificar_integridade_isolada`, novo)
+
+Um unico `Arquivo` critico com checksum alterado, sem nenhuma `Conexao`.
+Esperado: exatamente `MONITORAR` para o host. Nem silencio (v1), nem `ISOLAR`
+(a ameaca `integridade_comprometida` nao escala sozinha).
+
+### Caso 4: exclusao mutua entre rodadas (`_verificar_exclusao_mutua`)
 
 A escalada chega numa segunda janela de coleta, com a decisao antiga ja na
 memoria: declara varredura + forca bruta e roda (`MONITORAR`), depois declara
 o arquivo critico alterado e roda de novo (`ISOLAR`, exatamente uma decisao
 na MT, com `revogar_monitoramento` disparando antes de `decisao_isolar`).
 
-Esses tres casos sao os que garantem que a evidencia usada pela tabela crisp
+Esses quatro casos sao os que garantem que a evidencia usada pela tabela crisp
 x fuzzy abaixo (`_evidencia`, os mesmos 3 hosts) produz as decisoes crisp
 corretas antes de virar entrada do controlador fuzzy.
 
@@ -144,8 +166,9 @@ corretas antes de virar entrada do controlador fuzzy.
 A parte nova de v2: um controlador fuzzy Mamdani, em
 [scikit-fuzzy](https://pythonhosted.org/scikit-fuzzy/), que roda por cima da
 mesma evidencia do motor de regras acima, produz uma prioridade continua, e
-dela deriva uma terceira acao de triagem — `RESTRINGIR` — que v1 nao tinha
-como ter, porque so decidia entre dois valores fixos.
+dela deriva quatro acoes de triagem, `NENHUMA`, `MONITORAR`, `RESTRINGIR`,
+`ISOLAR`, incluindo `RESTRINGIR`, que v1 nao tinha como ter, porque so
+decidia entre dois valores fixos.
 
 ### O dominio
 
@@ -169,7 +192,8 @@ terceira opcao no meio.
 | `prioridade` (saida) | 0 a 10 | urgencia recomendada, continua |
 
 `severidade` pesa o quanto cada sinal se aproxima do seu proprio limiar de
-v1, com peso maior para `exfiltracao` e `integridade_violada` — os dois
+v1 (linear ate o limiar; acima dele cresce em escala logaritmica, +0.5 por
+decada, sem saturar em 1, 512 portas pesam mais que 100), com peso maior para `exfiltracao` e `integridade_violada`, os dois
 indicadores que em v1 ja bastam sozinhos para levantar uma ameaca de nivel
 alto. Os pesos (3/3/4/4, somando 10 quando ha dois ou mais indicadores
 corroborando) foram calibrados para que um host com evidencia tao forte
@@ -185,24 +209,25 @@ e os outros dois nao precisam de par.
 
 ### Os termos linguisticos
 
-Tres termos por variavel (`baixa`, `media`, `alta`), o minimo que ainda
-distingue as tres decisoes reais de uma fila de triagem: descartar ou revisar
-depois, colocar na fila normal, ou acionar resposta imediata. Funcoes de
-pertinencia triangulares (`trimf`), cobrindo o dominio inteiro sem lacunas.
+`severidade` e `confianca` tem tres termos (`baixa`, `media`, `alta`).
+`prioridade` tem um quarto, `nula`, um ombro estreito em zero: sem ele, todo
+host, mesmo o benigno, recebia ao menos `MONITORAR`, porque a saida nao tinha
+como dizer "nenhuma acao". Funcoes de pertinencia triangulares (`trimf`),
+cobrindo o dominio inteiro sem lacunas.
 
 ### Base de regras
 
 9 regras, uma para cada combinacao das 3x3 possibilidades de `severidade` x
 `confianca`, entao nenhum ponto do espaco de entrada fica sem regra que o
-cubra:
+cubra. O unico canto que vira `nula` e o de sinal e certeza ambos baixos:
 
 | severidade \ confianca | baixa | media | alta |
 | --- | --- | --- | --- |
-| **baixa** | baixa | baixa | media |
+| **baixa** | nula | baixa | media |
 | **media** | baixa | media | alta |
 | **alta** | media | alta | alta |
 
-### Uma terceira acao: `RESTRINGIR`
+### Quatro acoes: `NENHUMA`, `MONITORAR`, `RESTRINGIR`, `ISOLAR`
 
 A acao nao vem de reler o numero defuzzificado (`sim.output["prioridade"]`)
 contra limiares novos — isso refuzzificaria um valor que ja perdeu
@@ -210,15 +235,19 @@ informacao no processo de centroide. Em vez disso, cada termo de
 `prioridade` guarda sua propria forca de disparo agregada, acessivel em
 `prioridade.terms[label].membership_value[sim]` depois do `compute()`, e a
 acao e a do termo com maior forca — a leitura mais direta que o Mamdani
-oferece, sem inventar um segundo conjunto de limiares.
+oferece, sem inventar um segundo conjunto de limiares. Por isso a acao e o
+numero de `prioridade` impresso ao lado dela podem discordar (caso de intrusao
+forte sem integridade: prioridade 5.44, mas o termo `alta` vence com 0.6 e a
+acao e `ISOLAR`): sao duas leituras da mesma agregacao.
 
 | Termo vencedor | Acao |
 | --- | --- |
+| `nula` | `NENHUMA` (equivale a "sem decisao" de v1) |
 | `baixa` | `MONITORAR` |
 | `media` | `RESTRINGIR` (ex.: segmentar o host, revogar credenciais, sem isolar) |
 | `alta` | `ISOLAR` |
 
-Em empate, a ordem de leitura (`alta`, `media`, `baixa`) favorece a acao mais
+Em empate, a ordem de leitura (`alta`, `media`, `baixa`, `nula`) favorece a acao mais
 cautelosa, pelo mesmo motivo que v1 favorece escalada em `ameaca_critica`.
 
 ### Crisp x fuzzy, lado a lado
@@ -228,21 +257,43 @@ Rodando o cenario de `demo()` de v1 pelas duas leituras:
 | Host | Decisao crisp (v1) | severidade | confianca | prioridade | Acao fuzzy (v2) |
 | --- | --- | --- | --- | --- | --- |
 | `10.0.0.66` | ISOLAR | 10.00 | 70.0 | 8.14 | ISOLAR |
-| `10.0.0.20` | MONITORAR | 4.09 | 40.0 | 4.90 | RESTRINGIR |
-| `10.0.0.5` | sem decisao | 0.36 | 0.0 | 1.67 | MONITORAR |
+| `10.0.0.20` | MONITORAR | 4.60 | 40.0 | 4.90 | RESTRINGIR |
+| `10.0.0.5` | NENHUMA | 0.36 | 0.0 | 1.14 | NENHUMA |
 
 `10.0.0.20` e o caso que mostra a terceira acao em uso: em v1 ele so podia
 virar `MONITORAR`, mas a evidencia (900 MB exfiltrados fora do expediente,
 sem corroboracao de outro indicador) pede algo entre "so observar" e
 "isolar" — e e exatamente onde a acao fuzzy cai. A acao de `10.0.0.66`
 concorda com `ISOLAR` de v1, e a de `10.0.0.5` concorda com a ausencia de
-decisao, que e exatamente o que a autoverificacao (`_autoverificar_fuzzy`)
-confere.
+decisao (`NENHUMA`), que e exatamente o que a autoverificacao
+(`_autoverificar_fuzzy`) confere.
+
+### Grid de fronteiras: 5 casos
+
+Cada caso e a evidencia de um unico host, em cima de uma fronteira ou de um
+estado. Os resultados de v1 e v2 sao fixados por assert no notebook; se um
+limiar, um peso ou uma regra mudar, o caso quebra.
+
+| # | Caso | Fronteira / estado | sev | conf | prio | v1 | v2 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 500 MB + 1 byte as 18h | ultima hora do expediente | 0.03 | 0.0 | 0.72 | `NENHUMA` | `NENHUMA` |
+| 2 | 500 MB + 1 byte as 19h | primeira hora fora do expediente | 4.03 | 40.0 | 4.90 | `MONITORAR` | `RESTRINGIR` |
+| 3 | 99 portas, 9 falhas | logo abaixo dos limiares | 5.67 | 0.0 | 2.87 | `NENHUMA` | `MONITORAR` |
+| 4 | 100 portas, 10 falhas | exatamente nos limiares | 6.00 | 30.0 | 4.73 | `MONITORAR` | `RESTRINGIR` |
+| 5 | 512 portas, 47 falhas, `/etc/shadow` | escalada completa | 10.00 | 70.0 | 8.14 | `ISOLAR` | `ISOLAR` |
+
+Os quatro estados aparecem. As tres divergencias (casos 2, 3 e 4) sao
+deliberadas: o fuzzy enxerga o que o corte crisp descarta (caso 3: 99 portas e
+9 falhas, a um passo de disparar tudo, ainda merecem `MONITORAR`) e escala uma
+ameaca confirmada so por um indicador para `RESTRINGIR`. Alem do grid,
+`_verificar_monotonicidade` varre `severidade` e `confianca` e garante que
+mais sinal nunca derruba a prioridade.
 
 ### Build e execucao
 
 Sem build. No Colab, a primeira celula nova instala o `scikit-fuzzy`; rode as
-celulas em ordem — as primeiras 20 sao identicas a `cyber_warden.ipynb`.
+celulas em ordem, as primeiras 20 sao o motor de `cyber_warden.ipynb` mais a
+regra `ameaca_integridade`.
 Localmente:
 
 ```bash
@@ -250,8 +301,9 @@ pip install experta scikit-fuzzy numpy
 jupyter nbconvert --to notebook --execute --inplace cyber_warden_v2.ipynb
 ```
 
-A ultima celula roda a autoverificacao fuzzy; a autoverificacao crisp de v1
-(`_autoverificar()`) roda antes dela, sem alteracao.
+A ultima celula roda a autoverificacao fuzzy; a autoverificacao crisp
+(`_autoverificar()`) roda antes dela, e o grid de fronteiras e a checagem de
+monotonicidade rodam depois.
 
 ### Apresentacao
 
