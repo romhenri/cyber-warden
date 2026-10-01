@@ -143,17 +143,22 @@ corretas antes de virar entrada do controlador fuzzy.
 
 A parte nova de v2: um controlador fuzzy Mamdani, em
 [scikit-fuzzy](https://pythonhosted.org/scikit-fuzzy/), que roda por cima da
-mesma evidencia do motor de regras acima e produz uma prioridade continua.
+mesma evidencia do motor de regras acima, produz uma prioridade continua, e
+dela deriva uma terceira acao de triagem — `RESTRINGIR` — que v1 nao tinha
+como ter, porque so decidia entre dois valores fixos.
 
 ### O dominio
 
 Um analista de SOC recebe alertas continuamente e precisa decidir, na hora,
 quais tratar primeiro. A decisao crisp de v1 (`ISOLAR`/`MONITORAR`/nenhuma) ja
-resolve isso, mas colapsa tudo em tres categorias. Dentro da fila de
-`MONITORAR`, por exemplo, hosts com evidencia bem diferente ficam
-indistinguiveis. A camada fuzzy de v2 preserva essa granularidade: dois hosts
-`MONITORAR` podem ter prioridades fuzzy 4.1 e 6.8, e a fila de triagem usa
-esse numero para ordenar, em vez de tratar os dois como equivalentes.
+resolve isso, mas colapsa tudo em tres categorias, e so tem duas acoes
+possiveis quando alguma ameaca existe. Entre "isolar o host" e "so
+monitorar", falta uma resposta intermediaria — restringir o alcance do host
+(segmentar a rede, revogar credenciais) sem isola-lo — para o caso comum de
+uma ameaca real mas ainda sem confirmacao de comprometimento de raiz. A
+camada fuzzy de v2 preenche essa lacuna: em vez de reduzir tudo a dois
+valores fixos, o controlador deriva a acao da prioridade continua, com uma
+terceira opcao no meio.
 
 ### Entradas e saida
 
@@ -166,10 +171,17 @@ esse numero para ordenar, em vez de tratar os dois como equivalentes.
 `severidade` pesa o quanto cada sinal se aproxima do seu proprio limiar de
 v1, com peso maior para `exfiltracao` e `integridade_violada` — os dois
 indicadores que em v1 ja bastam sozinhos para levantar uma ameaca de nivel
-alto. `confianca` soma um peso fixo por indicador de v1 que a evidencia
-dispara, tambem maior para esses dois, porque `varredura` e `forca_bruta`
-sozinhos so viram ameaca quando combinados (`ameaca_intrusao`), e os outros
-dois nao precisam de par.
+alto. Os pesos (3/3/4/4, somando 10 quando ha dois ou mais indicadores
+corroborando) foram calibrados para que um host com evidencia tao forte
+quanto `10.0.0.66` em v1 (varredura, forca bruta e integridade violada ao
+mesmo tempo) sature `severidade` em 10 — sem isso, um host assim ficava a
+meio caminho entre os termos `media` e `alta`, e a acao derivada nao refletia
+a gravidade real do caso.
+
+`confianca` soma um peso fixo por indicador de v1 que a evidencia dispara,
+tambem maior para `exfiltracao` e `integridade_violada`, porque `varredura` e
+`forca_bruta` sozinhos so viram ameaca quando combinados (`ameaca_intrusao`),
+e os outros dois nao precisam de par.
 
 ### Os termos linguisticos
 
@@ -190,19 +202,42 @@ cubra:
 | **media** | baixa | media | alta |
 | **alta** | media | alta | alta |
 
+### Uma terceira acao: `RESTRINGIR`
+
+A acao nao vem de reler o numero defuzzificado (`sim.output["prioridade"]`)
+contra limiares novos — isso refuzzificaria um valor que ja perdeu
+informacao no processo de centroide. Em vez disso, cada termo de
+`prioridade` guarda sua propria forca de disparo agregada, acessivel em
+`prioridade.terms[label].membership_value[sim]` depois do `compute()`, e a
+acao e a do termo com maior forca — a leitura mais direta que o Mamdani
+oferece, sem inventar um segundo conjunto de limiares.
+
+| Termo vencedor | Acao |
+| --- | --- |
+| `baixa` | `MONITORAR` |
+| `media` | `RESTRINGIR` (ex.: segmentar o host, revogar credenciais, sem isolar) |
+| `alta` | `ISOLAR` |
+
+Em empate, a ordem de leitura (`alta`, `media`, `baixa`) favorece a acao mais
+cautelosa, pelo mesmo motivo que v1 favorece escalada em `ameaca_critica`.
+
 ### Crisp x fuzzy, lado a lado
 
 Rodando o cenario de `demo()` de v1 pelas duas leituras:
 
-| Host | Decisao crisp (v1) | severidade | confianca | Prioridade fuzzy (v2) |
-| --- | --- | --- | --- | --- |
-| `10.0.0.66` | ISOLAR | 7.00 | 70.0 | 5.38 |
-| `10.0.0.20` | MONITORAR | 3.06 | 40.0 | 4.65 |
-| `10.0.0.5` | sem decisao | 0.24 | 0.0 | 1.67 |
+| Host | Decisao crisp (v1) | severidade | confianca | prioridade | Acao fuzzy (v2) |
+| --- | --- | --- | --- | --- | --- |
+| `10.0.0.66` | ISOLAR | 10.00 | 70.0 | 8.14 | ISOLAR |
+| `10.0.0.20` | MONITORAR | 4.09 | 40.0 | 4.90 | RESTRINGIR |
+| `10.0.0.5` | sem decisao | 0.36 | 0.0 | 1.67 | MONITORAR |
 
-A ordem das prioridades fuzzy concorda com a gravidade das decisoes crisp
-(`ISOLAR` > `MONITORAR` > sem decisao), que e exatamente o que a
-autoverificacao (`_autoverificar_fuzzy`) confere.
+`10.0.0.20` e o caso que mostra a terceira acao em uso: em v1 ele so podia
+virar `MONITORAR`, mas a evidencia (900 MB exfiltrados fora do expediente,
+sem corroboracao de outro indicador) pede algo entre "so observar" e
+"isolar" — e e exatamente onde a acao fuzzy cai. A acao de `10.0.0.66`
+concorda com `ISOLAR` de v1, e a de `10.0.0.5` concorda com a ausencia de
+decisao, que e exatamente o que a autoverificacao (`_autoverificar_fuzzy`)
+confere.
 
 ### Build e execucao
 
