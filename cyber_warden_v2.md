@@ -139,7 +139,13 @@ Esses tres casos sao os que garantem que a evidencia usada pela tabela crisp
 x fuzzy abaixo (`_evidencia`, os mesmos 3 hosts) produz as decisoes crisp
 corretas antes de virar entrada do controlador fuzzy.
 
-## O dominio
+## Controlador fuzzy Mamdani
+
+A parte nova de v2: um controlador fuzzy Mamdani, em
+[scikit-fuzzy](https://pythonhosted.org/scikit-fuzzy/), que roda por cima da
+mesma evidencia do motor de regras acima e produz uma prioridade continua.
+
+### O dominio
 
 Um analista de SOC recebe alertas continuamente e precisa decidir, na hora,
 quais tratar primeiro. A decisao crisp de v1 (`ISOLAR`/`MONITORAR`/nenhuma) ja
@@ -149,7 +155,7 @@ indistinguiveis. A camada fuzzy de v2 preserva essa granularidade: dois hosts
 `MONITORAR` podem ter prioridades fuzzy 4.1 e 6.8, e a fila de triagem usa
 esse numero para ordenar, em vez de tratar os dois como equivalentes.
 
-## Entradas e saida
+### Entradas e saida
 
 | Variavel | Faixa | De onde vem |
 | --- | --- | --- |
@@ -165,14 +171,14 @@ dispara, tambem maior para esses dois, porque `varredura` e `forca_bruta`
 sozinhos so viram ameaca quando combinados (`ameaca_intrusao`), e os outros
 dois nao precisam de par.
 
-## Os termos linguisticos
+### Os termos linguisticos
 
 Tres termos por variavel (`baixa`, `media`, `alta`), o minimo que ainda
 distingue as tres decisoes reais de uma fila de triagem: descartar ou revisar
 depois, colocar na fila normal, ou acionar resposta imediata. Funcoes de
 pertinencia triangulares (`trimf`), cobrindo o dominio inteiro sem lacunas.
 
-## Base de regras
+### Base de regras
 
 9 regras, uma para cada combinacao das 3x3 possibilidades de `severidade` x
 `confianca`, entao nenhum ponto do espaco de entrada fica sem regra que o
@@ -184,7 +190,7 @@ cubra:
 | **media** | baixa | media | alta |
 | **alta** | media | alta | alta |
 
-## Crisp x fuzzy, lado a lado
+### Crisp x fuzzy, lado a lado
 
 Rodando o cenario de `demo()` de v1 pelas duas leituras:
 
@@ -198,7 +204,7 @@ A ordem das prioridades fuzzy concorda com a gravidade das decisoes crisp
 (`ISOLAR` > `MONITORAR` > sem decisao), que e exatamente o que a
 autoverificacao (`_autoverificar_fuzzy`) confere.
 
-## Build e execucao
+### Build e execucao
 
 Sem build. No Colab, a primeira celula nova instala o `scikit-fuzzy`; rode as
 celulas em ordem — as primeiras 20 sao identicas a `cyber_warden.ipynb`.
@@ -212,7 +218,7 @@ jupyter nbconvert --to notebook --execute --inplace cyber_warden_v2.ipynb
 A ultima celula roda a autoverificacao fuzzy; a autoverificacao crisp de v1
 (`_autoverificar()`) roda antes dela, sem alteracao.
 
-## Apresentacao
+### Apresentacao
 
 Discussao em sala de aula: a tabela crisp x fuzzy acima e os graficos de
 pertinencia das tres variaveis (`severidade.view()`, `confianca.view()`,
